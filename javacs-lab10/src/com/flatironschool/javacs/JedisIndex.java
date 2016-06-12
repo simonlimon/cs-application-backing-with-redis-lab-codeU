@@ -9,6 +9,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.TextNode;
 import org.jsoup.select.Elements;
 
 import redis.clients.jedis.Jedis;
@@ -67,8 +69,11 @@ public class JedisIndex {
 	 * @return Set of URLs.
 	 */
 	public Set<String> getURLs(String term) {
-        // FILL THIS IN!
-		return null;
+		Set<String> urls = new HashSet<>();
+		for (String s : jedis.smembers(urlSetKey(term))) {
+			urls.add(s.substring(12));
+		}
+		return urls;
 	}
 
     /**
@@ -78,8 +83,11 @@ public class JedisIndex {
 	 * @return Map from URL to count.
 	 */
 	public Map<String, Integer> getCounts(String term) {
-        // FILL THIS IN!
-		return null;
+		Map<String, Integer> map = new HashMap<>();
+		for (String url: getURLs(term)) {
+			map.put(url, getCount(url, term));
+		}
+		return map;
 	}
 
     /**
@@ -90,8 +98,11 @@ public class JedisIndex {
 	 * @return
 	 */
 	public Integer getCount(String url, String term) {
-        // FILL THIS IN!
-		return null;
+		String str = jedis.hget(termCounterKey(url), term);
+		if (str == null)
+			return 0;
+		else
+			return Integer.valueOf(str);
 	}
 
 
@@ -102,8 +113,25 @@ public class JedisIndex {
 	 * @param paragraphs  Collection of elements that should be indexed.
 	 */
 	public void indexPage(String url, Elements paragraphs) {
-        // FILL THIS IN!
+
+		if (termCounterKeys().contains(termCounterKey(url)))
+			return;
+
+		// make a TermCounter and count the terms in the paragraphs
+		TermCounter tc = new TermCounter(url);
+		tc.processElements(paragraphs);
+
+		Transaction t = jedis.multi();
+
+		// for each term in the TermCounter, add the TermCounter to the index and to the Redis hash
+		for (String term: tc.keySet()) {
+			t.sadd(urlSetKey(term), termCounterKey(url));
+			t.hincrBy(termCounterKey(url), term, tc.get(term));
+		}
+
+		t.exec();
 	}
+
 
 	/**
 	 * Prints the contents of the index.
@@ -223,11 +251,12 @@ public class JedisIndex {
 		Jedis jedis = JedisMaker.make();
 		JedisIndex index = new JedisIndex(jedis);
 		
-		//index.deleteTermCounters();
-		//index.deleteURLSets();
-		//index.deleteAllKeys();
+//		index.deleteTermCounters();
+//		index.deleteURLSets();
+//		index.deleteAllKeys();
 		loadIndex(index);
-		
+
+
 		Map<String, Integer> map = index.getCounts("the");
 		for (Entry<String, Integer> entry: map.entrySet()) {
 			System.out.println(entry);
